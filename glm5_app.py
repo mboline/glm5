@@ -4,49 +4,52 @@ import pymongo
 import os
 
 # --- DATABASE CONNECTION ---
-# We use st.secrets for security on the web. 
-# For local testing, it falls back to a dummy string if secrets aren't found.
-
 def get_database():
-    # Try to get the URI from Streamlit Secrets (for Web)
+    # 1. Try to get the URI from Streamlit Secrets (Web Environment)
     try:
         uri = st.secrets["MONGO_URI"]
     except:
-        # Fallback for local testing (Replace with your actual URI for local runs)
-        # Ideally, put this in a .streamlit/secrets.toml file locally
-        uri = os.environ.get("MONGO_URI", "mongodb://localhost:27017") 
+        # 2. Fallback for local testing (checks your computer's environment variables)
+        # You can also paste your string here temporarily for local testing, 
+        # but don't commit it to GitHub.
+        uri = os.environ.get("MONGO_URI", "") 
 
+    if not uri:
+        st.error("Database URI not found. Please set MONGO_URI in Streamlit Secrets.")
+        st.stop()
+
+    # Connect using the URI
     client = pymongo.MongoClient(uri)
+    
+    # Create/Switch to a NEW database specifically for this app
+    # This ensures we don't mix data with your 'WordInfo' database
     return client["library_db"]
 
 # --- HELPER FUNCTIONS ---
 def load_data(collection):
-    """Load data from MongoDB to a DataFrame."""
-    data = list(collection.find({}, {'_id': 0})) # Exclude the internal _id field
+    data = list(collection.find({}, {'_id': 0}))
     if not data:
         return pd.DataFrame(columns=["Title", "Author", "Purchased", "Read", "Rating", "Notes"])
     return pd.DataFrame(data)
 
 def save_book(collection, book_data):
-    """Insert a single book."""
     collection.insert_one(book_data)
 
 def delete_book(collection, title):
-    """Delete a book by title."""
     collection.delete_one({"Title": title})
 
 def update_book(collection, old_title, new_data):
-    """Update a book by title."""
     collection.update_one({"Title": old_title}, {"$set": new_data})
 
 # --- APP LAYOUT ---
 st.set_page_config(page_title="My Library", page_icon="📚", layout="wide")
 
-st.title("📚 Personal Library Tracker (MongoDB Edition)")
-st.write("Data is securely stored in the cloud.")
+st.title("📚 Personal Library Tracker")
+st.write("Securely hosted on MongoDB Atlas.")
 
 # Connect to DB
 db = get_database()
+# Create/Switch to the 'books' collection inside 'library_db'
 collection = db["books"]
 
 # Load current data
@@ -75,15 +78,14 @@ with st.sidebar:
                 "Notes": notes
             }
             save_book(collection, new_book)
-            st.success(f"Added '{title}' to library!")
+            st.success(f"Added '{title}'!")
             st.rerun()
         elif submitted and not title:
             st.error("Title is required.")
 
 # --- MAIN AREA: SEARCH AND VIEW ---
-search_term = st.text_input("🔍 Search by Title, Author, or Notes", "")
+search_term = st.text_input("🔍 Search", "")
 
-# Filter Data (Client-side filtering)
 if search_term:
     mask = df.apply(lambda row: row.astype(str).str.lower().str.contains(search_term.lower()).any(), axis=1)
     display_df = df[mask]
@@ -91,19 +93,11 @@ else:
     display_df = df
 
 st.subheader(f"Library ({len(display_df)} books)")
-st.dataframe(
-    display_df, 
-    use_container_width=True, 
-    hide_index=True,
-    column_config={
-        "Notes": st.column_config.TextColumn("Notes", width="large"),
-        "Rating": st.column_config.TextColumn("Rating", width="small")
-    }
-)
+st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 # --- EDIT / DELETE SECTION ---
 st.divider()
-st.subheader("Edit or Delete a Book")
+st.subheader("Edit or Delete")
 
 if not df.empty:
     book_titles = df["Title"].tolist()
@@ -136,10 +130,10 @@ if not df.empty:
                 "Notes": edit_notes
             }
             update_book(collection, selected_title, updated_data)
-            st.success("Book updated!")
+            st.success("Updated!")
             st.rerun()
 
         if btn_col2.button("🗑️ Delete Book", use_container_width=True, type="primary"):
             delete_book(collection, selected_title)
-            st.warning("Book deleted!")
+            st.warning("Deleted!")
             st.rerun()
